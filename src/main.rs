@@ -3,6 +3,8 @@ extern crate html5ever;
 mod fragment;
 mod row;
 mod table;
+mod month;
+mod error;
 
 use soup::prelude::*;
 use html5ever::rcdom::{Handle};
@@ -11,6 +13,7 @@ use itertools::{Itertools};
 use crate::fragment::*;
 use crate::row::*;
 use crate::table::*;
+use crate::error::*;
 
 fn main() {
     for table in get_steam_videocard_tables() {
@@ -47,9 +50,9 @@ fn get_steam_videocard_tables() -> Vec<Table> {
 
                 match class.as_str() {
                     "substats_col_left col_header"
-                        => vec![Fragment::TableName{value}],
-                    "substats_col_month col_header" | "substats_col_month_last_pct col_header" | "substats_col_month_last_chg"
-                        => vec![Fragment::TableHeader{value}],
+                        => vec![Fragment::TableName(value)],
+                    "substats_col_month_last_pct col_header"
+                        => vec![Fragment::TableHeader(value)],
                     "substats_row row_0" | "substats_row row_1"
                         => get_row_parts(e),
                     _ => vec![],
@@ -74,25 +77,20 @@ fn get_steam_videocard_tables() -> Vec<Table> {
 
     let mut tables = Vec::new();
         
-    for (key, group) in &cs.into_iter().group_by(|t| t.0) {
+    for (_, group) in &cs.into_iter().group_by(|t| t.0) {
         let values: Vec<&[Fragment]> = group.map(|t| t.1).collect();
         
         let (table_fragments, row_fragments): (Vec<&[Fragment]>, Vec<&[Fragment]>) = values.into_iter()
             .partition(|v| v.into_iter().all(Fragment::is_table_fragment));
 
-        let row_builder = Row::builder_with_size(chunk_size-1);
-
-        let (rows, row_errors): (Vec<Row>, Vec<String>) = row_fragments.iter()
-            .map(|fs| row_builder(fs))
+        let (rows, row_errors): (Vec<Row>, Vec<Error>) = row_fragments.iter()
+            .map(|fs| Row::from(fs))
             .partition_result();
 
         assert_eq!(0, row_errors.len(), "Error building rows. Errors: {:?}", row_errors);
 
-        println!("{:?}", key);
-
         if let Some(fs) = table_fragments.first() {
-            let table_builder = Table::builder_with_size(chunk_size-1);
-            if let Ok(table) = table_builder(fs, rows) {
+            if let Ok(table) = Table::from(fs, rows) {
                 tables.push(table);
             } // TODO print errors
         }
@@ -119,9 +117,9 @@ fn get_row_parts(element: Handle) -> Vec<Fragment> {
             let value = String::from(e.text().trim());
             match class.as_str() {
                 "substats_col_left" =>
-                    Option::Some(Fragment::RowName{value}),
-                "substats_col_month" | "substats_col_month_last_pct" | "substats_col_month_last_chg" =>
-                    Option::Some(Fragment::RowValue{value}),
+                    Option::Some(Fragment::RowName(value)),
+                "substats_col_month_last_pct" =>
+                    Option::Some(Fragment::RowValue(value)),
                 _ => Option::None,
             }
         })
